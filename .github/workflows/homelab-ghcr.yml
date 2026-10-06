@@ -1,0 +1,61 @@
+# Fork-only (dylanhaskins/OmniRoute): build an arm64 image from this branch for the homelab's docker-pi and push it to
+# ghcr.io/dylanhaskins/omniroute. Not for upstream — upstream publishes via docker-publish.yml.
+# Tags: <package.json version>-<short sha> (immutable, what the homelab compose pins) and <branch slug> (floating).
+name: Homelab image (ghcr, arm64)
+
+on:
+  push:
+    branches:
+      - "release/v*"
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: homelab-ghcr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'dylanhaskins/OmniRoute'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Resolve tags
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          SHORT=$(git rev-parse --short=8 HEAD)
+          SLUG=$(printf '%s' "$GITHUB_REF_NAME" | tr '/' '-')
+          echo "tags=ghcr.io/dylanhaskins/omniroute:${VERSION}-${SHORT},ghcr.io/dylanhaskins/omniroute:${SLUG}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: runner-base
+          platforms: linux/arm64
+          build-args: |
+            OMNIROUTE_USE_TURBOPACK=0
+            OMNIROUTE_BUILD_MEMORY_MB=12288
+          labels: |
+            org.opencontainers.image.source=https://github.com/dylanhaskins/OmniRoute
+            org.opencontainers.image.revision=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          push: true
